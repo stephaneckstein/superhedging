@@ -179,18 +179,17 @@ def ff_net(x, name, feats=((1, 'identity'),), n_layers=4, hidden_dim=32, input_d
 
 
 
-# Tests:
-if __name__ == '__main__':
-    import numpy as np
-    FEATURES = [(1, 'identity'), (1, 'square'), (2, 'prod')]
-    d = 10
-    X = tf.placeholder(dtype=tf.float32, shape=[None, d])
-    Y = ff_net(X, 'Hallo', feats=FEATURES, input_dim=d)
-    print(Y.shape)
-
-    batch = 2 ** 5
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        yval = sess.run(Y, feed_dict={X: np.random.random_sample([batch, d])})
-        print(yval)
+# # Tests:
+# import numpy as np
+# FEATURES = [(1, 'identity'), (1, 'square'), (2, 'prod')]
+# d = 10
+# X = tf.placeholder(dtype=tf.float32, shape=[None, d])
+# Y = ff_net(X, 'Hallo', feats=FEATURES, input_dim=d)
+# print(Y.shape)
+#
+# batch = 2 ** 5
+# with tf.Session() as sess:
+#     sess.run(tf.global_variables_initializer())
+#     yval = sess.run(Y, feed_dict={X: np.random.random_sample([batch, d])})
+#     print(yval)
 

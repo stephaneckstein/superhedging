@@ -8,17 +8,15 @@ from datetime import datetime
 
 class Hedging:
     def __init__(self, t=2, d=1, f=None, f_np=None, mu_0=None, theta=None, prob_type='MMOT', penal_type='L2',
-                 gamma=500, updating=0, batch_size=2**10, hidden=((1, 32), (0, 32)), layers=((1, 4), (0, 5)),
+                 gamma=500, updating=0, batch_size=2**10, hidden=((1, 32), (0, 64)), layers=((1, 4), (0, 5)),
                  features=((1, 'identity'),), add_instruments=None, training_spec=None, id=None, add_id=None,
                  densities=None, quantile_funs=None, misc_parameters=None, gradient_cap=None, activation='ReLu',
-                 saveit=0):
+                 tf_conf=tf.ConfigProto()):
         """
-        Very work in progress set up to (simply) calculate various (super-)hedging problems via both linear programming
-        or neural networks.
+
         :param t:
         :param d:
         :param f:
-        :param f_np:
         :param mu_0:
         :param theta:
         :param prob_type:
@@ -32,14 +30,7 @@ class Hedging:
         :param features:
         :param add_instruments:
         :param training_spec: dictionary that can contain entries like "learningrate: 0.001" etc
-        :param id:
-        :param add_id:
-        :param densities:
-        :param quantile_funs:
-        :param misc_parameters:
         :param gradient_cap: positive value that all gradients get capped by (in norm)
-        :param activation:
-        :param saveit:
         """
 
         self.time_steps = t
@@ -66,6 +57,7 @@ class Hedging:
         self.saver = None
         self.step_decrease = None
         self.value_list = None
+        self.tf_conf = tf_conf
         self.samples = None
         self.mu0_hedge = None
         self.total_hedge = None
@@ -90,7 +82,6 @@ class Hedging:
         self.primal_2_value_list = None
         self.vals_met = None
         self.lam_vals = None
-        self.saveit = saveit
 
         if id:
             self.identifier = id
@@ -722,7 +713,6 @@ class Hedging:
                         s1 -= trade_cost_mart * tf.square(strategy)
 
         # NOTE: Here, since we are in an MMOT setting, Markovian trading is for each dimension separately!
-        # Trading cost / transaction costs are very specific at the moment. TODO: Implement more generally
         trade_cost = self.get_training_spec('markov_trading_cost')
         for d in range(self.dimension):
             for inc_step in range(1, self.time_steps - 1):
@@ -940,7 +930,7 @@ class Hedging:
         n_fine = self.get_training_spec('n_fine')
         n_report = self.get_training_spec('n_report')
         t0 = time.time()
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             sess.run(tf.global_variables_initializer())
             gen_mu_0 = self.mu_0(batch_size=self.get_training_spec('batch_size_mu_0'))
             gen_theta = self.markov_gen_theta(batch_size=self.get_training_spec('batch_size_theta'))
@@ -984,8 +974,8 @@ class Hedging:
                     print('Current value: ' + str(np.mean(vals[n_train+t-n_report:])))
                     print('Current primal 1 value: ' + str(np.mean(vals_p1[n_train + t - n_report:])))
                     print('Current primal 2 value: ' + str(np.mean(vals_p2[n_train + t - n_report:])))
-            if self.saveit == 1:
-                self.saver.save(sess, 'SavedModels/'+self.identifier)
+
+            self.saver.save(sess, 'SavedModels/'+self.identifier)
         self.value_list = vals
         self.primal_1_value_list = vals_p1
         self.primal_2_value_list = vals_p2
@@ -995,7 +985,7 @@ class Hedging:
         n_fine = self.get_training_spec('n_fine')
         n_report = self.get_training_spec('n_report')
         t0 = time.time()
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             sess.run(tf.global_variables_initializer())
             gen_mu_0 = self.mu_0(batch_size=self.get_training_spec('batch_size_mu_0'))
             gen_theta = self.markov_gen_theta_new(batch_size=self.get_training_spec('batch_size_theta'))
@@ -1039,8 +1029,7 @@ class Hedging:
                     print('Current value: ' + str(np.mean(vals[n_train+t-n_report:])))
                     print('Current primal 1 value: ' + str(np.mean(vals_p1[n_train + t - n_report:])))
                     print('Current primal 2 value: ' + str(np.mean(vals_p2[n_train + t - n_report:])))
-            if self.saveit == 1:
-                self.saver.save(sess, 'SavedModels/'+self.identifier)
+            self.saver.save(sess, 'SavedModels/'+self.identifier)
         self.value_list = vals
         self.primal_1_value_list = vals_p1
         self.primal_2_value_list = vals_p2
@@ -1058,7 +1047,7 @@ class Hedging:
         n_lamda_wait = self.get_training_spec('n_lambda_wait')
 
         t0 = time.time()
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             sess.run(tf.global_variables_initializer())
             gen_mu_0 = self.mu_0(batch_size=self.get_training_spec('batch_size_mu_0'))
             gen_theta = self.theta(batch_size=self.get_training_spec('batch_size_theta'))
@@ -1145,8 +1134,7 @@ class Hedging:
                     print('Current convergence criteria: ' + str(np.abs(np.mean(vals_p1[t-n_report:])-np.mean(
                         vals_p2[t-n_report:]))))
                     print('Current value for Wasserstein distance to reference: ' + str(np.mean(vals_met[t-n_report:])))
-            if self.saveit == 1:
-                self.saver.save(sess, 'SavedModels/'+self.identifier)
+            self.saver.save(sess, 'SavedModels/'+self.identifier)
         self.value_list = vals
         self.primal_1_value_list = vals_p1
         self.primal_2_value_list = vals_p2
@@ -1171,7 +1159,7 @@ class Hedging:
         lam_vals = [(0, self.get_training_spec('lambda_init'))]
 
         t0 = time.time()
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             sess.run(tf.global_variables_initializer())
             gen_mu_0 = self.mu_0(batch_size=self.get_training_spec('batch_size_mu_0'))
             gen_theta = self.theta(batch_size=self.get_training_spec('batch_size_theta'))
@@ -1230,8 +1218,7 @@ class Hedging:
                     print('Current convergence criteria: ' + str(np.abs(np.mean(vals_p1[t-n_report:])-np.mean(
                         vals_p2[t-n_report:]))))
                     print('Current value for Wasserstein distance to reference: ' + str(np.mean(vals_met[t-n_report:])))
-            if self.saveit == 1:
-                self.saver.save(sess, 'SavedModels/'+self.identifier)
+            self.saver.save(sess, 'SavedModels/'+self.identifier)
         self.value_list = vals
         self.primal_1_value_list = vals_p1
         self.primal_2_value_list = vals_p2
@@ -1255,7 +1242,7 @@ class Hedging:
         n_fine = self.get_training_spec('n_fine')
         n_report = self.get_training_spec('n_report')
         t0 = time.time()
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             sess.run(tf.global_variables_initializer())
             gen_mu_0 = self.mu_0(batch_size=self.get_training_spec('batch_size_mu_0'))
             gen_theta = self.theta(batch_size=self.get_training_spec('batch_size_theta'))
@@ -1294,8 +1281,7 @@ class Hedging:
                     print('Current value: ' + str(np.mean(vals[n_train+t-n_report:])))
                     print('Current primal 1 value: ' + str(np.mean(vals_p1[n_train + t - n_report:])))
                     print('Current primal 2 value: ' + str(np.mean(vals_p2[n_train + t - n_report:])))
-            if self.saveit == 1:
-                self.saver.save(sess, 'SavedModels/'+self.identifier)
+            self.saver.save(sess, 'SavedModels/'+self.identifier)
         self.value_list = vals
         self.primal_1_value_list = vals_p1
         self.primal_2_value_list = vals_p2
@@ -1304,7 +1290,7 @@ class Hedging:
         print('Generating samples...')
         t0 = time.time()
         n_report = self.get_training_spec('n_report')
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             samples = np.zeros([0, self.time_steps, self.dimension])
             batch = self.get_training_spec('batch_size_theta')
@@ -1337,7 +1323,7 @@ class Hedging:
         print('Generating samples...')
         t0 = time.time()
         n_report = self.get_training_spec('n_report')
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             samples = np.zeros([0, self.time_steps, self.dimension])
             batch = self.get_training_spec('batch_size_theta')
@@ -1381,7 +1367,7 @@ class Hedging:
         n_report = self.get_training_spec('n_report')
         samples = np.zeros([0, self.time_steps, self.dimension])
 
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             batch = self.get_training_spec('batch_size_theta')
             gen_theta = self.theta(batch_size=batch)
@@ -1419,7 +1405,7 @@ class Hedging:
         samples = np.zeros([0, self.time_steps, 2*self.dimension])
         rho_value = self.get_parameter('rho_value')
 
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             batch = self.get_training_spec('batch_size_theta')
             gen_theta = self.theta(batch_size=batch)
@@ -1461,7 +1447,7 @@ class Hedging:
         rate_lambda = self.get_training_spec('rate_lambda')
         vals = []
         batch = self.get_training_spec('batch_size_theta')
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             gen_mu_0 = self.mu_0(batch_size=self.get_training_spec('batch_size_mu_0'))
             gen_theta = self.theta(batch_size=self.get_training_spec('batch_size_theta'))
@@ -1524,7 +1510,7 @@ class Hedging:
         print('Generating samples...')
         t0 = time.time()
         n_report = self.get_training_spec('n_report')
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             samples = np.zeros([0, self.time_steps, self.dimension])
             batch = self.get_training_spec('batch_size_theta')
@@ -1564,7 +1550,7 @@ class Hedging:
         print('Generating samples...')
         t0 = time.time()
         n_report = self.get_training_spec('n_report')
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             samples = np.zeros([0, self.time_steps, self.dimension])
             batch = self.get_training_spec('batch_size_theta')
@@ -1601,24 +1587,24 @@ class Hedging:
             self.samples = np.append(self.samples, samples, axis=0)
 
     def eval_static_hedge(self, points):
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             fvals = sess.run(self.mu0_hedge, feed_dict={self.S_mu_0: points})
         return fvals
 
     def eval_total_hedge(self, points):
-        with tf.Session() as sess:
+        with tf.Session(config=self.tf_conf) as sess:
             self.saver.restore(sess, 'SavedModels/'+self.identifier)
             fvals = sess.run(self.total_hedge, feed_dict={self.S_theta: points})
         return fvals
 
     def get_primal_value(self, n_samples):
         if len(self.samples) >= n_samples:
-            with tf.Session() as sess:
+            with tf.Session(config=self.tf_conf) as sess:
                 val_h = sess.run(self.obj_eval, feed_dict={self.S_theta: self.samples[-n_samples:, :, :]})
         else:
             self.gen_samples(n_gen_samples=n_samples - len(self.samples))
-            with tf.Session() as sess:
+            with tf.Session(config=self.tf_conf) as sess:
                 val_h = sess.run(self.obj_eval, feed_dict={self.S_theta: self.samples[-n_samples:, :, :]})
         return np.mean(val_h)
 
@@ -1642,24 +1628,30 @@ class Hedging:
 
 
 if __name__ == '__main__':
+
+    # Very simple test spec:
+    # mean = [0, 0]
+    # cov = np.array([[1, 0], [0, 1.5]])
+    # def gen_norm_2d(batch_size):
+    #     while 1:
+    #         yield np.reshape(np.random.multivariate_normal(mean=mean, cov=cov, size=batch_size), [batch_size, 2, 1])
+
+
     # def f_obj(s):
     #     return -tf.nn.relu(s[:, T-1, 0] - s[:, T-2, 0])
-
-    T = 2
-    d = 1
-    K = 2
-    P_TYPE = 'OT'  # 'MMOT', 'OT', 'Markov_new', 'Markov_alone'
-    MINMAX = 1  # 1 means supremum (over measures) and -1 means infimum (over measures)
-
     def f_obj(x):
-        return MINMAX * tf.nn.relu(tf.reduce_sum(x[:, T-1, :] - x[:, 0, :], axis=1))
+        return -tf.reduce_sum(tf.pow(x[:, 0, :] - x[:, 1, :], 2), axis=1)
+
+    T = 10
+    d = 2
+    K = 3
     # (gen_fun, density_fun) = simple_random_mixture(K, T, d, den=1, each_dim_sep=1, hom_mc=1)
     (gen_fun, density_fun) = simple_random_mixture(K, T, d, den=1, each_dim_sep=1, hom_mc=0)
 
-    training_spec = {'batch_size_mu_0': 2 ** 10, 'batch_size_theta': 2 ** 10, 'n_train': 20000,
-                     'n_fine': 20000, 'markov_trading_cost': 0.1, 'n_report': 1000}
+    training_spec = {'batch_size': 2 ** 9, 'batch_size_mu_0': 2 ** 12, 'batch_size_theta': 2 ** 15, 'n_train': 20000,
+                     'n_fine': 20000, 'markov_trading_cost': 0.1, 'n_report': 10}
 
-    bla = Hedging(theta=gen_fun, mu_0=gen_fun, f=f_obj, prob_type=P_TYPE, t=T, d=d, gamma=1000,
+    bla = Hedging(theta=gen_fun, mu_0=gen_fun, f=f_obj, prob_type='OT', t=T, d=d, gamma=1000,
                   training_spec=training_spec, hidden=((0, 128), (1, 128)))
     print('Problem type: ' + bla.prob_type)
     bla.__setattr__('densities', density_fun)

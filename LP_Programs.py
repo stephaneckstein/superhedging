@@ -90,7 +90,7 @@ def u_quantization_bundle(t, d, p_samp=None, n=100, n_samples=10**7, quantile_fu
                         a_list[i][j][k] = np.mean(q_vec[int(round(small_samp)) * k: int(round(small_samp)) * (k + 1)])
                         sh += a_list[i][j][k]
                     sh /= n[i][j]
-                    if given_ev:
+                    if given_ev is not None:
                         diff = given_ev[j] - sh
                         for k in range(n[i][j]):
                             a_list[i][j][k] += diff
@@ -101,7 +101,7 @@ def u_quantization_bundle(t, d, p_samp=None, n=100, n_samples=10**7, quantile_fu
                         a_list[i][j][k] = quantile_funs[i][j]((2*(k+1)-1)/(2*n[i][j]))
                         sh += a_list[i][j][k]
                     sh /= n[i][j]
-                    if given_ev:
+                    if given_ev is not None:
                         diff = given_ev[j] - sh
                         # a_list[i][j][-1] += n[i][j] * diff
                         for k in range(n[i][j]):
@@ -121,7 +121,7 @@ def u_quantization_bundle(t, d, p_samp=None, n=100, n_samples=10**7, quantile_fu
                         a_list[i][j][k] = q_vec[int(round(((2*(k+1)-1)/(2*n[i][j])) * n_samples))]
                     sh += a_list[i][j][k]
                 sh /= n[i][j]
-                if given_ev:
+                if given_ev is not None:
                     diff = given_ev[j] - sh
                     for k in range(n[i][j]):
                         a_list[i][j][k] += diff
@@ -130,14 +130,17 @@ def u_quantization_bundle(t, d, p_samp=None, n=100, n_samples=10**7, quantile_fu
     return(a_list, w_list)
 
 
-def visualize_LP_sol(points1, points2, weights, name='testname', saveit=0):
+def visualize_LP_sol(points1, points2, weights, name='testname', save=0, showit=1):
     # points1 is np-array of size n_1, points2 of size n_2. weights is [n_1, n_2]
     import matplotlib.pyplot as plt
     pp1, pp2 = np.meshgrid(points1, points2)
     plt.scatter(pp1, pp2, s=weights * 10 / np.max(weights), marker='o')
-    if saveit == 1:
-        plt.savefig(name)
-    plt.show()
+    if save:
+        plt.savefig('Images/'+name)
+    if showit:
+        plt.show()
+    else:
+        plt.clf()
 
 
 def gromov_wasserstein(mu1, mu2, c_1, c_2, p=2):
@@ -192,7 +195,8 @@ def gromov_wasserstein(mu1, mu2, c_1, c_2, p=2):
     return objective_val, optimizer
 
 
-def lp_hom_mmot(margs, f_np, mart=0, hom=0, mart_markovian=0, minmax='min', Delta=None, mmot_eps=0, hom_eps=0):
+def lp_hom_mmot(margs, f_np, mart=0, hom=0, mart_markovian=0, minmax='min', Delta=None, mmot_eps=0, hom_eps=0,
+                eq_constraints=None, geq_constraints=None):
     """
 
     :param margs: list with t entries, (each having d entries, where each entry is a discrete measure)
@@ -200,6 +204,14 @@ def lp_hom_mmot(margs, f_np, mart=0, hom=0, mart_markovian=0, minmax='min', Delt
     :param mart:
     :param hom: if hom=1, it is assumed that there is no redundancy in the support of each measure. So there should
     not be two dirac measures at the same point in one of the marginal descriptions.
+    :param mart_markovian:
+    :param minmax: 'min' or 'max'
+    :param Delta: As in paper for homogeneous trading terms
+    :param mmot_eps: relaxation of martingale-constraint
+    :param hom_eps: relaxation of homogeneity constraint
+    :param eq_constraints: None or list of functions f_i, where int f_i d pi = 0 is added as a constraint
+    :param geq constraints: None or list of functions f_i, where int f_i d pi >= 0 is added as a constraint
+    each f_i takes similar input as f_np
     :return:
     """
     t = len(margs)
@@ -430,6 +442,38 @@ def lp_hom_mmot(margs, f_np, mart=0, hom=0, mart_markovian=0, minmax='min', Delt
 
                             # TODO: Constraint for when there is support missing
         print('Done!')
+
+    # Additional constraints:
+    if eq_constraints is not None:
+        print('Setting additional equality constraints...')
+        ind_eq_c = 0
+        for f_eq in eq_constraints:
+            s = 0
+            input_arr = np.zeros([t, d])
+            for index in np.ndindex(ind):
+                for t_ind in range(t):
+                    for d_ind in range(d):
+                        input_arr[t_ind, d_ind] = margs[t_ind][d_ind][0][index[t_ind * d + d_ind]]
+                s += pi_var[index] * f_eq(input_arr)
+            m.addConstr(s == 0, 'eq_constr_'+str(ind_eq_c))
+            ind_eq_c += 1
+        print('Done!')
+
+    if geq_constraints is not None:
+        print('Setting additional inequality constraints...')
+        ind_ieq_c = 0
+        for f_eq in eq_constraints:
+            s = 0
+            input_arr = np.zeros([t, d])
+            for index in np.ndindex(ind):
+                for t_ind in range(t):
+                    for d_ind in range(d):
+                        input_arr[t_ind, d_ind] = margs[t_ind][d_ind][0][index[t_ind * d + d_ind]]
+                s += pi_var[index] * f_eq(input_arr)
+            m.addConstr(s >= 0, 'ineq_constr_'+str(ind_ieq_c))
+            ind_ieq_c += 1
+        print('Done!')
+
     # Specify objective function
     print('Setting objective function...')
     obj = LinExpr()
@@ -525,57 +569,110 @@ if __name__ == '__main__':
     # #  and 1
     # print(x)
 
-    # LP MMOT test:
-    T = 2
-    d = 2
-    p = 2
-    def f_spread(x):
-        return np.abs(x[T-1, 0] - x[T-1, 1]) ** p
+    # vals = []
+    # for n in range(2, 20):
+    #     # 20 seems to be the cutoff where it doesn't work anymore
+    #     print('______________')
+    #     print('n = ' + str(n))
+    #     # LP MMOT test:
+    #     T = 2
+    #     d = 2
+    #     p = 0.5
+    #     def f_spread(x):
+    #         return np.abs(x[T-1, 0] - x[T-1, 1]) ** p
+    #
+    #     K = 0
+    #     def f_basket(x):
+    #         return np.maximum(x[T-1, 0] + x[T-1, 1] - K, 0)
+    #
+    #     # marginals spread:
+    #     # n = 15  # p = 3, n = 10, 11, 12, 13, 14, 15 values 31.1573, 31.1506, 31.1436, 31.1398, 31.1359, 31.1331
+    #     print('Number of parameters in the model: ' + str((2*n+1)**2 * (4*n+1)**2))
+    #     w = 1/(2*n) * np.ones(2*n+1)
+    #     w[0] = 1/(4*n)
+    #     w[-1] = 1/(4*n)
+    #     margs_00 = [np.linspace(-1, 1, 2*n+1), w]
+    #     margs_01 = [np.linspace(-1, 1, 2*n+1), w]
+    #     w2 = 1/(4*n) * np.ones(4*n+1)
+    #     w2[0] = 1/(8*n)
+    #     w2[-1] = 1/(8*n)
+    #     margs_11 = [np.linspace(-2, 2, 4*n+1), w2]
+    #     w3 = 1/(6*n) * np.ones(6*n+1)
+    #     w3[0] = 1/(12*n)
+    #     w3[-1] = 1/(12*n)
+    #     margs_10 = [np.linspace(-3, 3, 6*n+1), w3]
+    #
+    #     # # marginals basket:
+    #     # n = 10  # p = 3, n = 10, 11, 12, 13, 14, 15 values 31.1573, 31.1506, 31.1436, 31.1398, 31.1359, 31.1331
+    #     # w = 1/(2*n) * np.ones(2*n+1)
+    #     # w[0] = 1/(4*n)
+    #     # w[-1] = 1/(4*n)
+    #     # margs_01 = [np.linspace(-1, 1, 2*n+1), w]
+    #     # w2 = 1/(4*n) * np.ones(4*n+1)
+    #     # w2[0] = 1/(8*n)
+    #     # w2[-1] = 1/(8*n)
+    #     # margs_00 = [np.linspace(-2, 2, 4*n+1), w2]
+    #     # w3 = 1/(6*n) * np.ones(6*n+1)
+    #     # w3[0] = 1/(12*n)
+    #     # w3[-1] = 1/(12*n)
+    #     # margs_11 = [np.linspace(-3, 3, 6*n+1), w3]
+    #     # margs_10 = [np.linspace(-3, 3, 6*n+1), w3]
+    #     #
+    #     #
+    #     margs = [[margs_00, margs_01], [margs_10, margs_11]]
+    #     val, opti = lp_hom_mmot(margs, f_spread, minmax='min', mart=1, hom=0, mmot_eps=0)
+    #     vals.append(val)
+    #     print(val)
+    #     # print(opti.shape)
+    #     # points_1 = margs_11[0]
+    #     # points_2 = margs_10[0]
+    #     # opti_2 = np.sum(opti, axis=(0, 1))
+    #     # visualize_LP_sol(points_1, points_2, opti_2, name='LP_K_0_min')
+    # print(vals)
+    # np.savetxt('C:/Users/steve/Dropbox/CodeAblage/MMOTusingH_Class/SavedValuesConvergence/ValuesConvergenceLP_ponehalfn2to19', vals)
 
-    K = 0
-    def f_basket(x):
-        return np.maximum(x[T-1, 0] + x[T-1, 1] - K, 0)
-
-    # # marginals spread:
-    # n = 10  # p = 3, n = 10, 11, 12, 13, 14, 15 values 31.1573, 31.1506, 31.1436, 31.1398, 31.1359, 31.1331
-    # w = 1/(2*n) * np.ones(2*n+1)
-    # w[0] = 1/(4*n)
-    # w[-1] = 1/(4*n)
-    # margs_00 = [np.linspace(-1, 1, 2*n+1), w]
-    # margs_01 = [np.linspace(-1, 1, 2*n+1), w]
-    # w2 = 1/(4*n) * np.ones(4*n+1)
-    # w2[0] = 1/(8*n)
-    # w2[-1] = 1/(8*n)
-    # margs_11 = [np.linspace(-2, 2, 4*n+1), w2]
-    # w3 = 1/(6*n) * np.ones(6*n+1)
-    # w3[0] = 1/(12*n)
-    # w3[-1] = 1/(12*n)
-    # margs_10 = [np.linspace(-3, 3, 6*n+1), w3]
-
-    # marginals basket:
-    n = 5  # p = 3, n = 10, 11, 12, 13, 14, 15 values 31.1573, 31.1506, 31.1436, 31.1398, 31.1359, 31.1331
-    w = 1/(2*n) * np.ones(2*n+1)
-    w[0] = 1/(4*n)
-    w[-1] = 1/(4*n)
-    margs_01 = [np.linspace(-1, 1, 2*n+1), w]
-    w2 = 1/(4*n) * np.ones(4*n+1)
-    w2[0] = 1/(8*n)
-    w2[-1] = 1/(8*n)
-    margs_00 = [np.linspace(-2, 2, 4*n+1), w2]
-    w3 = 1/(6*n) * np.ones(6*n+1)
-    w3[0] = 1/(12*n)
-    w3[-1] = 1/(12*n)
-    margs_11 = [np.linspace(-3, 3, 6*n+1), w3]
-    margs_10 = [np.linspace(-3, 3, 6*n+1), w3]
+    # LP Sanity Check:
+    for run_ind in range(100):
+        T = 2
+        d = 2
+        np.random.seed(run_ind)
+        c = np.random.random_sample([d, d])
+        n = 18
+        print('Number of parameters in the LP: ' + str((2*n+1)**d * (4*n+1)**d))
+        # n_true = 10 ** 7
+        # x_samp = np.random.random_sample(n_true) * 4 - 2
+        # y_samp = np.zeros([n_true, d])
+        # for i in range(d):
+        #     y_samp[:, i] = x_samp
+        # true_val = 0
+        # for i in range(d):
+        #     for j in range(d):
+        #         true_val += c[i, j] * np.mean(y_samp[:, i] * y_samp[:, j])
+        # print('Approximate true value by sampling: ' + str(true_val))
+        # np.savetxt('C:/Users/steve/Dropbox/CodeAblage/MMOTusingH_Class/SavedValuesSanity/LP_sample_val_' + str(T) +'_' + str(d) + '_' + str(n)+'_'+str(run_ind), [true_val])
 
 
-    margs = [[margs_00, margs_01], [margs_10, margs_11]]
-    val, opti = lp_hom_mmot(margs, f_basket, minmax='min', mart=1, hom=0, mmot_eps=0)
-    print(opti.shape)
-    points_1 = margs_11[0]
-    points_2 = margs_10[0]
-    opti_2 = np.sum(opti, axis=(0, 1))
-    visualize_LP_sol(points_1, points_2, opti_2, name='LP_K_0_min')
+        def f_obj(x):
+            out = 0
+            for i in range(d):
+                for j in range(d):
+                    out += c[i, j] * x[T-1, i] * x[T-1, j]
+            return out
+
+        # marginals spread:
+        w = 1/(2*n) * np.ones(2*n+1)
+        w[0] = 1/(4*n)
+        w[-1] = 1/(4*n)
+        margs_0 = [np.linspace(-1, 1, 2*n+1), w]
+        w2 = 1/(4*n) * np.ones(4*n+1)
+        w2[0] = 1/(8*n)
+        w2[-1] = 1/(8*n)
+        margs_1 = [np.linspace(-2, 2, 4*n+1), w2]
+
+        margs = [[margs_0]*d, [margs_1]*d]
+        val, opti = lp_hom_mmot(margs, f_obj, minmax='max', mart=1, hom=0, mmot_eps=0)
+        print('Optimal Value by LP: ' + str(val))
+        np.savetxt('C:/Users/steve/Dropbox/CodeAblage/MMOTusingH_Class/SavedValuesSanity/LP_val_' + str(T) +'_' + str(d) + '_' + str(n)+'_'+str(run_ind), [val])
 
 
     # # Wasserstein ball brute force test:
@@ -634,9 +731,9 @@ if __name__ == '__main__':
     # plt.show()
 
     # # LP Hom Test:
-    # from scipy.stats import binom
-    # T_MAX = 10
-    # T = 10
+    # from scipy.special import binom
+    # T_MAX = 9
+    # T = 5
     # d = 1
     # K = 1
     # def f_forward(x):
@@ -647,10 +744,15 @@ if __name__ == '__main__':
     # n_vars = 1
     # for t in range(T_MAX-T, T_MAX):
     #     n_vars *= t+1
-    #     margs.append([[np.linspace(100-t, 100+t, t+1), np.ones(t+1) * 1/(t+1)]])
+    #     # margs.append([[np.linspace(100-t, 100+t, t+1), np.ones(t+1) * 1/(t+1)]])
+    #     weights = np.array([binom(t, i) for i in range(t+1)])
+    #     weights /= np.sum(weights)
+    #     margs.append([[np.linspace(100-t, 100+t, t+1), weights]])
     # print(n_vars)
     # ov, opti = lp_hom_mmot(margs, f_forward, minmax='min', hom=1, mart=1)
     # ov2, opti2 = lp_hom_mmot(margs, f_forward, minmax='max', hom=1, mart=1)
+    # print(ov)
+    # print(ov2)
 
     # from scipy.stats import binom
     # T = 2
